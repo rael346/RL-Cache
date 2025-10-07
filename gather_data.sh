@@ -13,11 +13,11 @@ mkdir $temporary_file_path
 shopt -s nullglob
 csvfiles=($1/*.csv)
 
-echo './feature_collector/collector' $1 $temporary_file_path ${#csvfiles[@]}
-./feature_collector/collector $1 $temporary_file_path ${#csvfiles[@]}
+echo './build/feature_collector' $1 $temporary_file_path ${#csvfiles[@]}
+./build/feature_collector $1 $temporary_file_path ${#csvfiles[@]}
 
-echo './reward_collector/collector' $temporary_file_path $2 ${#csvfiles[@]}
-./reward_collector/collector $temporary_file_path $2 ${#csvfiles[@]}
+echo './build/reward_collector' $temporary_file_path $2 ${#csvfiles[@]}
+./build/reward_collector $temporary_file_path $2 ${#csvfiles[@]}
 
 echo $temporary_file_path 'removed'
 rm -rf $temporary_file_path

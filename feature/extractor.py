@@ -1,50 +1,55 @@
-from collections import deque
-
+import pickle
 import sys
+from collections import deque
+from mmap import mmap
+
 import numpy as np
 from tqdm import tqdm
-import pickle
-from mmap import mmap
 
 
 def iterate_dataset(filenames):
     for fname in filenames:
         names = PacketFeaturer.core_feature_names
         types = PacketFeaturer.feature_types
-        with open(fname, 'r+b') as hdlr:
+        with open(fname, "r+b") as hdlr:
             maped_file = mmap(hdlr.fileno(), 0)
 
             for line in iter(maped_file.readline, ""):
-                line_converted = line.split(' ')
-                line_converted = [types[i](line_converted[i]) for i in range(len(line_converted))]
-                line_converted += [0] * len(names[len(line_converted):])
-                yield dict(zip(names, line_converted))
+                line_converted = line.strip().split(b" ")
+                line_converted_new = []
+
+                if line == b"":
+                    break
+                for i in range(len(line_converted)):
+                    line_converted_new.append(types[i](line_converted[i]))
+                line_converted_new += [0] * len(names[len(line_converted_new) :])
+                yield dict(zip(names, line_converted_new))
 
 
 def get_trace_length(filenames):
     start_fname = filenames[0]
     names = PacketFeaturer.core_feature_names
     types = PacketFeaturer.feature_types
-    hdlr = open(start_fname, 'r')
+    hdlr = open(start_fname, "r")
 
     line = hdlr.readline()
-    line_converted = line.split(' ')
+    line_converted = line.split(" ")
     line_converted = [types[i](line_converted[i]) for i in range(len(line_converted))]
-    line_converted += [0] * len(names[len(line_converted):])
+    line_converted += [0] * len(names[len(line_converted) :])
     start_data = dict(zip(names, line_converted))
     hdlr.close()
 
     end_fname = filenames[len(filenames) - 1]
-    hdlr = open(end_fname, 'r')
+    hdlr = open(end_fname, "r")
 
     line = hdlr.readlines()
     line = line[len(line) - 1]
-    line_converted = line.split(' ')
+    line_converted = line.split(" ")
     line_converted = [types[i](line_converted[i]) for i in range(len(line_converted))]
-    line_converted += [0] * len(names[len(line_converted):])
+    line_converted += [0] * len(names[len(line_converted) :])
     end_data = dict(zip(names, line_converted))
     hdlr.close()
-    return end_data['timestamp'] - start_data['timestamp']
+    return end_data["timestamp"] - start_data["timestamp"]
 
 
 def split_feature(feature, perc_steps):
@@ -54,103 +59,107 @@ def split_feature(feature, perc_steps):
     percentiles[len(percentiles) - 1] += 1
     percentiles = list(np.unique(percentiles))
     percentiles = sorted(percentiles)
-    return [(percentiles[i-1], percentiles[i]) for i in range(1, len(percentiles))]
+    return [(percentiles[i - 1], percentiles[i]) for i in range(1, len(percentiles))]
 
 
 def collect_features(output_filename, t_max, filenames):
-    feature_matrix = []
-    counter = 0
-
     featurer = PacketFeaturer(None)
-    summary = np.zeros((len(featurer.names),))
 
-    output_file = open(output_filename, 'w')
+    output_file = open(output_filename, "w")
 
-    def shorten_name(x):
-        return ''.join([item[0] for item in x.split(' ')])
+    feature_matrix = []
+    # summary = np.zeros((len(featurer.names),))
+    for counter, row in enumerate(iterate_dataset(filenames)):
+        if (counter != 0 and counter % 50000 == 0) or counter == t_max:
+            # summary += np.sum(feature_matrix, axis=0)
+            for item in feature_matrix:
+                output_file.write(" ".join([str(element) for element in item]) + "\n")
+            feature_matrix = []
+        featurer.update_packet_state(row)
 
-    try:
-        for row in iterate_dataset(filenames):
-            if (counter != 0 and counter % 50000 == 0) or counter == t_max:
-                summary += np.sum(feature_matrix, axis=0)
-                for item in feature_matrix:
-                    output_file.write(' '.join([str(element) for element in item]) + '\n')
-                feature_matrix = []
-            featurer.update_packet_state(row)
-            data = featurer.get_pure_features(row).tolist()
-            feature_matrix.append(np.asarray(data))
-            if (counter != 0 and counter % 5000 == 0) or counter == t_max:
-                d = featurer.feature_num
-                str_formatted = ' '.join(['{:s}: \033[1m{:^5.3f}\033[0m' for _ in range(d)])
-                str_formatted = '\033[1m{:d}K\033[0m ' + str_formatted
-                mean_list = summary / counter
-                name_list = [shorten_name(item) for item in featurer.names]
-                common = [counter / 1000]
-                for i in range(len(name_list)):
-                    common.append(name_list[i])
-                    common.append(mean_list[i])
-                str_formatted = str_formatted.format(*common)
-                sys.stdout.write('\r' + str_formatted)
-                sys.stdout.flush()
-            featurer.update_packet_info(row)
-            counter += 1
-            if counter == t_max:
-                break
-        print ''
-    except KeyboardInterrupt:
-        pass
+        # check when the iterator is finished
+        if row["size"] == 0 or counter == t_max:
+            break
+
+        feature_matrix.append(featurer.get_pure_features(row))
+
+        # logging
+        # if (counter != 0 and counter % 5000 == 0) or counter == t_max:
+        #     mean_list = summary / counter
+        #     common = [
+        #         f"{name}: {mean:^5.3f}" for name, mean in zip(featurer.names, mean_list)
+        #     ]
+        #     print(f"{counter // 1000}K", " ".join(common), "\n")
+
     for item in feature_matrix:
-        output_file.write(' '.join([str(element) for element in item]) + '\n')
+        output_file.write(" ".join([str(element) for element in item]) + "\n")
     output_file.close()
 
 
 def print_mappings(mappings):
     mappings_flat = [item[0] for item in mappings] + [mappings[len(mappings) - 1][1]]
-    pdata = ['A: \033[1m{:5.3f}\033[0m'] * len(mappings_flat[:min(17, len(mappings_flat))])
-    pstr = ' | '.join(pdata)
-    print pstr.format(*mappings_flat)
+    pdata = ["A: \033[1m{:5.3f}\033[0m"] * len(
+        mappings_flat[: min(17, len(mappings_flat))]
+    )
+    pstr = " | ".join(pdata)
+    print(pstr.format(*mappings_flat))
 
 
 def print_statistics(statistics):
     stat_vector = []
     p_vector = []
-    for mean, std in statistics[:min(10, len(statistics))]:
+    for mean, std in statistics[: min(10, len(statistics))]:
         stat_vector.append(mean)
         stat_vector.append(std)
-        p_vector.append('M: \033[1m{:5.3f}\033[0m V: \033[1m{:5.3f}\033[0m')
-    print ' | '.join(p_vector).format(*stat_vector)
+        p_vector.append("M: \033[1m{:5.3f}\033[0m V: \033[1m{:5.3f}\033[0m")
+    print(" | ".join(p_vector).format(*stat_vector))
 
 
 class PacketFeaturer:
-
-    core_feature_names = ['timestamp', 'id', 'size', 'number of observations', 'last appearance',
-                          'logical time', 'exponential recency', 'exponential logical time', 'entropy', 'future']
+    core_feature_names = [
+        "timestamp",
+        "id",
+        "size",
+        "number of observations",
+        "last appearance",
+        "logical time",
+        "exponential recency",
+        "exponential logical time",
+        "entropy",
+        "future",
+    ]
 
     feature_extractors = {
-        'log size': lambda x, l, r: np.log(1 + float(x['size'])),
-        'log frequency': lambda x, l, r: -np.log(1e-4 + float(x['number of observations']) / float(1 + l)),
-        'log gdsf': lambda x, l, r: -np.log(1e-4 + float(x['number of observations'])) +
-                                    np.log(1 + float(x['size'])),
-        'log bhr': lambda x, l, r: np.log(1e-4 + float(x['number of observations'])) +
-                                   np.log(1 + float(x['size'])),
-        'log time recency': lambda x, l, r: np.log(2 + float(r - x['last appearance'])),
-        'log request recency': lambda x, l, r: np.log(2 + float(l - x['logical time'])),
-        'log exp time recency': lambda x, l, r: np.log(2 + float(x['exponential recency'])),
-        'log exp request recency': lambda x, l, r: np.log(2 + float(x['exponential logical time'])),
-        'entropy': lambda x, l, r: float(x['entropy']),
-        'gdsf': lambda x, l, r: float(x['number of observations']) / float(x['size']),
-        'frequency': lambda x, l, r: float(x['number of observations']) / float(1 + l),
-        'number of observations': lambda x, l, r: float(x['number of observations']),
-        'size': lambda x, l, r: float(x['size']),
-        'time recency': lambda x, l, r: float(r) - float(x['last appearance']),
-        'exp time recency': lambda x, l, r: float(x['exponential recency']),
-        'request recency': lambda x, l, r: float(l - x['logical time']),
-        'exp request recency': lambda x, l, r: float(x['exponential logical time'])
+        "log size": lambda x, l, r: np.log(1 + float(x["size"])),
+        "log frequency": lambda x, l, r: -np.log(
+            1e-4 + float(x["number of observations"]) / float(1 + l)
+        ),
+        "log gdsf": lambda x, l, r: -np.log(1e-4 + float(x["number of observations"]))
+        + np.log(1 + float(x["size"])),
+        "log bhr": lambda x, l, r: np.log(1e-4 + float(x["number of observations"]))
+        + np.log(1 + float(x["size"])),
+        "log time recency": lambda x, l, r: np.log(2 + float(r - x["last appearance"])),
+        "log request recency": lambda x, l, r: np.log(2 + float(l - x["logical time"])),
+        "log exp time recency": lambda x, l, r: np.log(
+            2 + float(x["exponential recency"])
+        ),
+        "log exp request recency": lambda x, l, r: np.log(
+            2 + float(x["exponential logical time"])
+        ),
+        "entropy": lambda x, l, r: float(x["entropy"]),
+        "gdsf": lambda x, l, r: float(x["number of observations"]) / float(x["size"]),
+        "frequency": lambda x, l, r: float(x["number of observations"]) / float(1 + l),
+        "number of observations": lambda x, l, r: float(x["number of observations"]),
+        "size": lambda x, l, r: float(x["size"]),
+        "time recency": lambda x, l, r: float(r) - float(x["last appearance"]),
+        "exp time recency": lambda x, l, r: float(x["exponential recency"]),
+        "request recency": lambda x, l, r: float(l - x["logical time"]),
+        "exp request recency": lambda x, l, r: float(x["exponential logical time"]),
     }
 
     ml_feature_names = feature_extractors.keys()
 
-    log_features = [key for key in feature_extractors.keys() if 'log ' in key]
+    log_features = [key for key in feature_extractors.keys() if "log " in key]
 
     feature_types = [int, int, int, int, int, int, float, float, float, float, float]
 
@@ -174,7 +183,7 @@ class PacketFeaturer:
         self.pure_mode = False
 
         if verbose:
-            print 'Packet featurer creation started'
+            print("Packet featurer creation started")
 
         if config is not None:
             self.names = config["usable names"]
@@ -182,11 +191,18 @@ class PacketFeaturer:
             self.statistics = {}
             self.bias = 0
             self.normalization_limit = 0
-            self.pure_mode = config['pure mode']
+            self.pure_mode = config["pure mode"]
             if self.verbose:
-                print 'Features', ' '.join(
-                    ['{:d}: \033[1m"{:s}"\033[0m'.format(1 + i, self.names[i]) for i in range(len(self.names))])
-                print 'Real features\033[1m', self.feature_num, '\033[0m'
+                print(
+                    "Features",
+                    " ".join(
+                        [
+                            '{:d}: \033[1m"{:s}"\033[0m'.format(1 + i, self.names[i])
+                            for i in range(len(self.names))
+                        ]
+                    ),
+                )
+                print("Real features\033[1m", self.feature_num, "\033[0m")
 
             self.forget_lambda = 0
 
@@ -198,94 +214,118 @@ class PacketFeaturer:
             self.apply_config(config)
 
             if self.verbose:
-                print 'Features dim\033[1m', self.dim, '\033[0m'
+                print("Features dim\033[1m", self.dim, "\033[0m")
 
         self.classical = self.dim == 0
 
         if self.verbose:
-            print 'Operates in\033[1m', 'classical' if self.classical else 'ML', '\033[0mmode'
+            print(
+                "Operates in\033[1m",
+                "classical" if self.classical else "ML",
+                "\033[0mmode",
+            )
 
         self.full_reset()
 
         if verbose:
-            print 'Packet featurer created'
+            print("Packet featurer created")
 
     def save_statistics(self, config):
-        with open(config['filename'], 'w') as f:
-            pickle.dump([self.feature_mappings,
-                         self.statistics,
-                         self.split_step,
-                         self.warmup,
-                         self.names], f)
+        with open(config["filename"], "wb") as f:
+            pickle.dump(
+                [
+                    self.feature_mappings,
+                    self.statistics,
+                    self.split_step,
+                    self.warmup,
+                    self.names,
+                ],
+                f,
+            )
 
     def collect_statistics(self, config):
+        print(f"\ncollecting statistics from {config['statistics']}")
         pv = self.verbose
         self.verbose = True
-        data_raw = open(config['statistics'], 'r').readlines()[config['warmup']:]
+        data_raw = open(config["statistics"], "r").readlines()[config["warmup"] :]
         feature_set = np.zeros(shape=(len(data_raw), self.feature_num))
 
-        if self.verbose:
-            print 'Loading\033[1m data\033[0m'
-        indexes_of_features = [PacketFeaturer.ml_feature_names.index(name) for name in self.names]
-        for i in tqdm(range(feature_set.shape[0])):
-            data_full = data_raw[i].split(' ')
-            feature_set[i] = np.array([float(data_full[j]) for j in indexes_of_features])
+        print("feature set shape", feature_set.shape)
+        print("warmup", config["warmup"])
+        print("split step", config["split step"])
+        indexes_of_features = [
+            list(PacketFeaturer.ml_feature_names).index(name) for name in self.names
+        ]
+        for i in tqdm(range(feature_set.shape[0]), "Loading data"):
+            data_full = data_raw[i].split(" ")
+            feature_set[i] = np.array(
+                [float(data_full[j]) for j in indexes_of_features]
+            )
 
         for i in range(len(self.names)):
             name = self.names[i]
-            if self.verbose:
-                print 'Doing\033[1m', name, '\033[0m'
-            self.feature_mappings[name] = split_feature(feature_set[:, i], config['split step'])
+            self.feature_mappings[name] = split_feature(
+                feature_set[:, i], config["split step"]
+            )
             statistics_arrays = []
             for _ in range(len(self.feature_mappings[name])):
                 statistics_arrays.append(deque([]))
-            for item in tqdm(feature_set[:, i]):
+            for item in tqdm(feature_set[:, i], f"Doing {name}"):
                 _, feature_index = self.__get_feature_vector(name, item)
                 statistics_arrays[feature_index].append(item)
-            statistics_vector = [(np.mean(item), np.std(item)) for item in statistics_arrays]
+            statistics_vector = [
+                (np.mean(item), np.std(item)) for item in statistics_arrays
+            ]
             self.statistics[name] = statistics_vector
-            if config['show stat'] and self.verbose:
+            if config["show stat"] and self.verbose:
                 print_mappings(self.feature_mappings[name])
                 print_statistics(self.statistics[name])
         self.verbose = pv
 
     def load_statistics(self, config):
-        with open(config['filename'], 'r') as f:
+        print(f"\nLoading Stats from {config['filename']}")
+        with open(config["filename"], "rb") as f:
             data = pickle.load(f)
             self.feature_mappings = data[0]
             self.statistics = data[1]
-            self.warmup = config['warmup']
-            self.split_step = config['split step']
+            self.warmup = config["warmup"]
+            self.split_step = config["split step"]
             assert self.names == data[4]
             assert len(self.feature_mappings) >= len(self.names)
             assert self.split_step == data[2]
             assert self.warmup == data[3]
 
     def apply_config(self, config):
-        self.forget_lambda = config['lambda']
-        self.warmup = config['warmup']
+        self.forget_lambda = config["lambda"]
+        self.warmup = config["warmup"]
         self.logical_time = 0
-        self.split_step = config['split step']
+        self.split_step = config["split step"]
         loading_failed = False
-        self.normalization_limit = config['normalization limit']
-        self.bias = config['bias']
+        self.normalization_limit = config["normalization limit"]
+        self.bias = config["bias"]
         if self.verbose:
-            print 'Bias\033[1m', self.bias, '\033[0mNormalization\033[1m', self.normalization_limit, '\033[0m'
-        if config['load']:
+            print(
+                "Bias\033[1m",
+                self.bias,
+                "\033[0mNormalization\033[1m",
+                self.normalization_limit,
+                "\033[0m",
+            )
+        if config["load"]:
             if self.verbose:
-                print 'Loading...'
+                print("Loading...")
             try:
                 self.load_statistics(config)
                 if self.verbose:
-                    print '\033[1m\033[92mSUCCESS\033[0m'
+                    print("\033[1m\033[92mSUCCESS\033[0m")
             except:
                 if self.verbose:
-                    print '\033[1m\033[91mFAIL\033[0m'
+                    print("\033[1m\033[91mFAIL\033[0m")
                 loading_failed = True
 
-            if not config['load'] or loading_failed:
+            if not config["load"] or loading_failed:
                 self.collect_statistics(config)
-                if config['save'] or loading_failed:
+                if config["save"] or loading_failed:
                     self.save_statistics(config)
             for name in self.names:
                 self.dim += len(self.statistics[name])
@@ -302,7 +342,9 @@ class PacketFeaturer:
                 minmax[name].append(a)
                 minmax[name].append(b)
 
-        mv_vals = [(1 + min(minmax[name]), max(minmax[name]) - 1) for name in self.names]
+        mv_vals = [
+            (1 + min(minmax[name]), max(minmax[name]) - 1) for name in self.names
+        ]
         self.init_vals = mv_vals
 
         self.memory_vector = np.zeros(self.dim)
@@ -328,14 +370,21 @@ class PacketFeaturer:
 
     def update_packet_state(self, packet):
         self.logical_time += 1
-        self.real_time = packet['timestamp']
+        self.real_time = packet["timestamp"]
 
     def update_packet_info(self, packet):
         pass
 
     def get_pure_features(self, packet):
-        return np.asarray([PacketFeaturer.feature_extractors[key](packet, self.logical_time, self.real_time)
-                           for key in self.names])
+        feat = []
+        for key in self.names:
+            feat.append(
+                PacketFeaturer.feature_extractors[key](
+                    packet, self.logical_time, self.real_time
+                )
+            )
+
+        return np.asarray(feat)
 
     def gen_feature_set(self, rows, pure=False):
         self.reset()
@@ -370,19 +419,23 @@ class PacketFeaturer:
             memory_features = np.zeros((len(rows), self.dim))
             for i in range(len(rows)):
                 memory_features[i] = self.memory_vector
-                self.memory_vector = self.memory_vector * self.forget_lambda + \
-                                     feature_matrix[i] * (1 - self.forget_lambda)
+                self.memory_vector = (
+                    self.memory_vector * self.forget_lambda
+                    + feature_matrix[i] * (1 - self.forget_lambda)
+                )
             feature_matrix = np.concatenate([feature_matrix, memory_features], axis=1)
 
         return np.asarray(feature_matrix)
 
     def get_static_features(self, packet):
-        feature_vector = [float(packet['number of observations']) / (float(packet['size'])),
-                          self.logical_time,
-                          1 if packet['number of observations'] > 1.5 else 0,
-                          (float(packet['future']) - 1) / (float(packet['size'])),
-                          float(packet['number of observations']),
-                          1]
+        feature_vector = [
+            float(packet["number of observations"]) / (float(packet["size"])),
+            self.logical_time,
+            1 if packet["number of observations"] > 1.5 else 0,
+            (float(packet["future"]) - 1) / (float(packet["size"])),
+            float(packet["number of observations"]),
+            1,
+        ]
 
         return np.asarray(feature_vector)
 
@@ -419,8 +472,8 @@ class PacketFeaturer:
                 return addition, counter
             counter += 1
 
-        print feature_name, feature_value, self.classical
-        print self.statistics
+        print(feature_name, feature_value, self.classical)
+        print(self.statistics)
         assert False
 
     def __get_packet_features_from_pure(self, pure_features):
@@ -428,7 +481,9 @@ class PacketFeaturer:
         statistics = {}
         for name in self.names:
             feature_index = self.names.index(name)
-            feature_vector, index = self.__get_feature_vector(name, pure_features[feature_index])
+            feature_vector, index = self.__get_feature_vector(
+                name, pure_features[feature_index]
+            )
             stat_vector = [0] * len(feature_vector)
             stat_vector[index] = 1
             statistics[name] = stat_vector
@@ -441,7 +496,16 @@ class PacketFeaturer:
         for name in self.names:
             for j in range(len(self.statistics[name])):
                 if statistics[name][j] != 0:
-                    result[index] = self.bias + min(1, max(-1, (result_features[index] - self.statistics[name][j][0]) / (
-                        1e-4 + self.normalization_limit * self.statistics[name][j][1])))
+                    result[index] = self.bias + min(
+                        1,
+                        max(
+                            -1,
+                            (result_features[index] - self.statistics[name][j][0])
+                            / (
+                                1e-4
+                                + self.normalization_limit * self.statistics[name][j][1]
+                            ),
+                        ),
+                    )
                 index += 1
         return np.asarray(result)

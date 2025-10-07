@@ -220,7 +220,7 @@ def load_data(filepath, filename, skip, max_length=None, uid=''):
     single_value_keys = ['flow', 'iterations', 'entropy']
 
     for filename in file_names[skip:]:
-        od = pickle.load(open(filename, 'r'))
+        od = pickle.load(open(filename, 'rb'))
 
         data['alphas'] = od['alphas']
 
