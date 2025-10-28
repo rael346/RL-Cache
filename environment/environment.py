@@ -268,7 +268,7 @@ def train(
     config_model["init vals"] = featurer.init_vals
 
     model_admission, model_eviction, common_model, last_dim = create_models(
-        config_model, featurer.dim
+        config_model, featurer.dim, multiplier=1
     )
 
     if load_eviction:
@@ -327,8 +327,8 @@ def train(
         common_model.summary()
 
     class_info = name2class(config["target"])
-    if class_info["admission mode"] and verbose:
-        model_admission.summary()
+    # if class_info["admission mode"] and verbose:
+    #     model_admission.summary()
     if class_info["eviction mode"] and verbose:
         model_eviction.summary()
 

@@ -1,3 +1,4 @@
+import math
 import pickle
 import sys
 from collections import deque
@@ -130,20 +131,24 @@ class PacketFeaturer:
     ]
 
     feature_extractors = {
-        "log size": lambda x, l, r: np.log(1 + float(x["size"])),
-        "log frequency": lambda x, l, r: -np.log(
+        "log size": lambda x, l, r: math.log(1 + float(x["size"])),
+        "log frequency": lambda x, l, r: -math.log(
             1e-4 + float(x["number of observations"]) / float(1 + l)
         ),
-        "log gdsf": lambda x, l, r: -np.log(1e-4 + float(x["number of observations"]))
+        "log gdsf": lambda x, l, r: -math.log(1e-4 + float(x["number of observations"]))
         + np.log(1 + float(x["size"])),
-        "log bhr": lambda x, l, r: np.log(1e-4 + float(x["number of observations"]))
+        "log bhr": lambda x, l, r: math.log(1e-4 + float(x["number of observations"]))
         + np.log(1 + float(x["size"])),
-        "log time recency": lambda x, l, r: np.log(2 + float(r - x["last appearance"])),
-        "log request recency": lambda x, l, r: np.log(2 + float(l - x["logical time"])),
-        "log exp time recency": lambda x, l, r: np.log(
+        "log time recency": lambda x, l, r: math.log(
+            2 + float(r - x["last appearance"])
+        ),
+        "log request recency": lambda x, l, r: math.log(
+            2 + float(l - x["logical time"])
+        ),
+        "log exp time recency": lambda x, l, r: math.log(
             2 + float(x["exponential recency"])
         ),
-        "log exp request recency": lambda x, l, r: np.log(
+        "log exp request recency": lambda x, l, r: math.log(
             2 + float(x["exponential logical time"])
         ),
         "entropy": lambda x, l, r: float(x["entropy"]),
@@ -415,15 +420,15 @@ class PacketFeaturer:
             self.update_packet_info(row)
             counter += 1
 
-        if not self.classical and not pure:
-            memory_features = np.zeros((len(rows), self.dim))
-            for i in range(len(rows)):
-                memory_features[i] = self.memory_vector
-                self.memory_vector = (
-                    self.memory_vector * self.forget_lambda
-                    + feature_matrix[i] * (1 - self.forget_lambda)
-                )
-            feature_matrix = np.concatenate([feature_matrix, memory_features], axis=1)
+        # if not self.classical and not pure:
+        #     memory_features = np.zeros((len(rows), self.dim))
+        #     for i in range(len(rows)):
+        #         memory_features[i] = self.memory_vector
+        #         self.memory_vector = (
+        #             self.memory_vector * self.forget_lambda
+        #             + feature_matrix[i] * (1 - self.forget_lambda)
+        #         )
+        #     feature_matrix = np.concatenate([feature_matrix, memory_features], axis=1)
 
         return np.asarray(feature_matrix)
 

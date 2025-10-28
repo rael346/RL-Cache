@@ -9,6 +9,8 @@ from keras.models import Sequential
 from keras.optimizers import Adam
 from keras.regularizers import Regularizer
 
+from environment.torch_model import AdmissionModel, create_model
+
 activation = "elu"
 momentum = 0.9
 
@@ -179,7 +181,7 @@ def compile_model(model, config, mtype):
     return model
 
 
-def create_admission_model(config, input_dim, common_model, multiplier=2):
+def create_admission_model(config, input_dim, common_model, multiplier=1):
     dropout_rate = config["dropout rate"]
 
     multiplier_each = config["multiplier each"]
@@ -244,8 +246,9 @@ def create_models(config, input_dim, multiplier=2):
         common_model = create_common_model(config, input_dim, multiplier)
     else:
         common_model = None
-    model_admission = create_admission_model(
-        config, input_dim, common_model, multiplier
-    )
+    # model_admission = create_admission_model(
+    #     config, input_dim, common_model, multiplier
+    # )
+    model_admission = AdmissionModel(input_dim, config["admission lr"])
     model_eviction = create_eviction_model(config, input_dim, common_model, multiplier)
     return model_admission, model_eviction, common_model, last_dim

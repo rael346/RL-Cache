@@ -835,8 +835,8 @@ def test_algorithms_light(
     keys = sorted(algorithms.keys())
 
     name_mapping = compress_names(algorithms.keys())
-    for name in name_mapping.keys():
-        name_mapping[name] = extreme_compress(name_mapping[name])
+    # for name in name_mapping.keys():
+    #     name_mapping[name] = extreme_compress(name_mapping[name])
 
     for i in range(len(rows)):
         if verbose and print_at is not None and i == print_at:
